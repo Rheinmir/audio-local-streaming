@@ -270,8 +270,8 @@ function connectWS() {
       } else {
         try {
           const msg = JSON.parse(e.data);
-          if (msg.type === 'conn_info') {
-            const icon = msg.type === 'lan' ? '🏠' : msg.internet === false ? '🌐✓' : '🌐⚠️';
+          if (msg.msg === 'conn_info') {
+            const icon = msg.conn_type === 'lan' ? '🏠' : msg.internet === false ? '🌐✓' : '🌐⚠️';
             const cls  = msg.internet === false ? 'ok' : msg.internet ? 'warn' : '';
             d('d-conn', icon + ' ' + msg.label, cls);
           }

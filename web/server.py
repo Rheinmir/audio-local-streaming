@@ -237,8 +237,13 @@ async def ws_handler(websocket):
     try:
         # Send connection type info immediately
         conn_info = detect_connection_type(ip)
-        conn_info['ip'] = ip
-        await websocket.send(json.dumps({'type': 'conn_info', **conn_info}))
+        await websocket.send(json.dumps({
+            'msg': 'conn_info',
+            'conn_type': conn_info['type'],
+            'label':     conn_info['label'],
+            'internet':  conn_info['internet'],
+            'ip':        ip,
+        }))
 
         async for msg in websocket:
             if isinstance(msg, str) and msg.startswith('ping:'):
