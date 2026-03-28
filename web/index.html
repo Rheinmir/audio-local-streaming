@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AudioStream</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0f0f0f; color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    min-height: 100vh; gap: 18px; padding: 20px;
+  }
+  h1 { font-size: 1.2rem; font-weight: 500; opacity: 0.5; letter-spacing: 3px; }
+
+  #btn {
+    width: 110px; height: 110px; border-radius: 50%; border: none;
+    background: #1db954; color: #fff; font-size: 1rem; font-weight: 700;
+    cursor: pointer; transition: transform .1s, background .2s;
+    box-shadow: 0 0 40px #1db95455; flex-shrink: 0;
+  }
+  #btn:hover { transform: scale(1.05); }
+  #btn.playing { background: #e53935; box-shadow: 0 0 40px #e5393555; }
+
+  #status { font-size: 0.85rem; opacity: 0.55; min-height: 1.2em; }
+
+  .card {
+    background: #161616; border: 1px solid #2a2a2a;
+    border-radius: 12px; padding: 16px; width: 100%; max-width: 360px;
+  }
+  .card-title { font-size: 0.65rem; letter-spacing: 2px; opacity: 0.4; margin-bottom: 12px; }
+
+  .row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .row:last-child { margin-bottom: 0; }
+  .label { font-size: 0.78rem; opacity: 0.5; width: 90px; flex-shrink: 0; }
+
+  select, input[type=number], input[type=text] {
+    flex: 1; background: #0f0f0f; border: 1px solid #333; color: #fff;
+    border-radius: 8px; padding: 7px 10px; font-size: 0.82rem;
+    outline: none; appearance: none;
+  }
+  select:focus, input:focus { border-color: #1db954; }
+
+  input[type=range] { flex: 1; accent-color: #1db954; }
+
+  #vu { width: 100%; max-width: 360px; height: 6px; background: #222; border-radius: 3px; overflow: hidden; }
+  #vu-bar { height: 100%; width: 0%; background: #1db954; border-radius: 3px; transition: width 0.04s; }
+
+  .debug-row { display: flex; justify-content: space-between; font-family: monospace;
+               font-size: 0.72rem; color: #555; padding: 2px 0; }
+  .debug-row span { color: #888; }
+  .ok  { color: #1db954 !important; }
+  .err { color: #e53935 !important; }
+  .warn{ color: #ffb300 !important; }
+</style>
+</head>
+<body>
+<h1>AUDIOSTREAM</h1>
+<button id="btn" onclick="toggle()">▶ PLAY</button>
+<div id="status">Loading...</div>
+<div id="vu"><div id="vu-bar"></div></div>
+
+<!-- Config -->
+<div class="card">
+  <div class="card-title">CẤU HÌNH</div>
+  <div class="row">
+    <span class="label">Nguồn audio</span>
+    <select id="device-select"><option value="">Đang tải...</option></select>
+  </div>
+  <input type="hidden" id="port-input" value="8765">
+  <div class="row">
+    <span class="label">Âm lượng</span>
+    <input type="range" id="volume" min="0" max="1" step="0.02" value="1"
+      oninput="setVolume(this.value)">
+  </div>
+</div>
+
+<!-- Debug -->
+<div class="card">
+  <div class="card-title">TRẠNG THÁI</div>
+  <div class="debug-row">WebSocket <span id="d-ws" class="warn">chưa kết nối</span></div>
+  <div class="debug-row">Latency   <span id="d-lat">-</span></div>
+  <div class="debug-row">Packets/s <span id="d-pps">0</span></div>
+  <div class="debug-row">Đã nhận   <span id="d-kb">0 KB</span></div>
+  <div class="debug-row">AudioCtx  <span id="d-ctx">-</span></div>
+  <div class="debug-row">Worklet   <span id="d-wl">-</span></div>
+  <div class="debug-row">Lỗi       <span id="d-err" class="err">-</span></div>
+</div>
+
+<script>
+const SAMPLE_RATE = 48000;
+
+let audioCtx, workletNode, analyser, ws, gainNode;
+let playing = false;
+let recvBytes = 0, ppsCount = 0;
+let pingTimer = null;
+
+function startPing() {
+  if (pingTimer) clearInterval(pingTimer);
+  pingTimer = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN)
+      ws.send('ping:' + Date.now());
+  }, 2000);
+}
+
+// ── helpers ──
+const $ = id => document.getElementById(id);
+function d(id, msg, cls) { const e = $(id); e.textContent = msg; e.className = cls || ''; }
+function status(msg) { $('status').textContent = msg; }
+function setVolume(v) { if (gainNode) gainNode.gain.value = +v; }
+
+// ── load config + devices on startup ──
+async function loadConfig() {
+  try {
+    const [cfg, devs] = await Promise.all([
+      fetch('/api/config').then(r => r.json()),
+      fetch('/api/devices').then(r => r.json()),
+    ]);
+
+    window._serverCfg = cfg;
+    $('port-input').value = cfg.wss_port || 8765;
+
+    // Populate device list (info only — server already captures fixed device)
+    const sel = $('device-select');
+    sel.innerHTML = '';
+    devs.forEach(dev => {
+      const opt = document.createElement('option');
+      opt.value = dev.index;
+      opt.textContent = `[${dev.index}] ${dev.name}`;
+      if (dev.index === cfg.device_index) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    if (cfg.device_name) {
+      status('Sẵn sàng');
+    }
+  } catch(e) {
+    status('Không tải được config');
+  }
+}
+
+// ── 1-second tick ──
+setInterval(() => {
+  $('d-pps').textContent = ppsCount;
+  ppsCount = 0;
+  if (audioCtx) {
+    const s = audioCtx.state;
+    d('d-ctx', s, s === 'running' ? 'ok' : 'warn');
+    if (s === 'suspended') audioCtx.resume();
+  }
+}, 1000);
+
+// ── VU meter ──
+function startVU() {
+  if (!analyser) return;
+  const buf = new Uint8Array(analyser.fftSize);
+  (function frame() {
+    if (!playing) { $('vu-bar').style.width = '0%'; return; }
+    analyser.getByteTimeDomainData(buf);
+    let peak = 0;
+    for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i]-128)/128; if (v>peak) peak=v; }
+    $('vu-bar').style.width = (peak*100)+'%';
+    $('vu-bar').style.background = peak > 0.7 ? '#e53935' : '#1db954';
+    requestAnimationFrame(frame);
+  })();
+}
+
+// ── audio init ──
+async function startAudio() {
+  const sr = (window._serverCfg && window._serverCfg.device_rate) || 48000;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive', sampleRate: sr });
+  gainNode = audioCtx.createGain();
+  analyser = audioCtx.createAnalyser(); analyser.fftSize = 256;
+  gainNode.connect(analyser);
+  analyser.connect(audioCtx.destination);
+
+  await audioCtx.audioWorklet.addModule('audio-processor.js');
+  workletNode = new AudioWorkletNode(audioCtx, 'pcm-processor', {
+    numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2]
+  });
+  workletNode.connect(gainNode);
+  d('d-wl', 'OK', 'ok');
+  d('d-ctx', audioCtx.state, audioCtx.state === 'running' ? 'ok' : 'warn');
+
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+  startVU();
+}
+
+// ── WebSocket ──
+function connectWS() {
+  const host = location.hostname;
+  const port = $('port-input').value || 8765;
+  const url  = `wss://${host}:${port}`;
+  d('d-ws', 'đang kết nối...', 'warn');
+  status('Đang kết nối...');
+
+  ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen  = () => {
+    d('d-ws', `connected :${port}`, 'ok');
+    status('Đang phát audio ▶');
+    startPing();
+  };
+  ws.onerror = () => { d('d-ws', 'lỗi', 'err'); d('d-err', `WS error — thử vào https://${host}:${port} chấp nhận cert`, 'err'); };
+  ws.onclose = () => {
+    d('d-ws', 'mất kết nối', 'warn');
+    if (playing) { status('Mất kết nối, thử lại 3s...'); setTimeout(connectWS, 3000); }
+  };
+  ws.onmessage = (e) => {
+    if (typeof e.data === 'string') {
+      if (e.data.startsWith('ping:')) {
+        const rtt = Date.now() - parseInt(e.data.slice(5));
+        d('d-lat', Math.round(rtt/2) + ' ms', rtt/2 < 20 ? 'ok' : rtt/2 < 60 ? 'warn' : 'err');
+      }
+      return;
+    }
+    ppsCount++;
+    recvBytes += e.data.byteLength;
+    $('d-kb').textContent = (recvBytes/1024).toFixed(1) + ' KB';
+    if (workletNode) workletNode.port.postMessage(e.data, [e.data]);
+  };
+}
+
+// ── toggle ──
+async function toggle() {
+  const btn = $('btn');
+  if (!playing) {
+    playing = true;
+    btn.textContent = '⏹ STOP'; btn.classList.add('playing');
+    try {
+      if (!audioCtx) await startAudio();
+      connectWS();
+    } catch(e) {
+      d('d-err', e.message, 'err');
+      playing = false; btn.textContent = '▶ PLAY'; btn.classList.remove('playing');
+    }
+  } else {
+    playing = false;
+    btn.textContent = '▶ PLAY'; btn.classList.remove('playing');
+    if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+    if (ws)       { ws.close(); ws = null; }
+    if (audioCtx) { audioCtx.close(); audioCtx = null; workletNode = null; analyser = null; }
+    d('d-lat', '-', '');
+    status('Đã dừng'); d('d-ctx', '-', '');
+  }
+}
+
+loadConfig();
+</script>
+</body>
+</html>

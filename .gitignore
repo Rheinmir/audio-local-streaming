@@ -1,0 +1,7 @@
+web/cert.pem
+web/key.pem
+*.zip
+__pycache__/
+*.pyc
+go-recv/recv
+go-recv/AudioStream.app
