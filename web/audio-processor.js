@@ -4,9 +4,9 @@ class PCMProcessor extends AudioWorkletProcessor {
     super();
     this._buf = [];
     this._bufSamples = 0;
-    this._ready = false;          // don't play until pre-buffer is full
-    this._TARGET_MS = 80;         // target buffer size in ms (absorb jitter)
-    this._MIN_MS    = 30;         // resume playing when buffer recovers to this
+    this._ready = false;
+    this._TARGET_MS = (options && options.processorOptions && options.processorOptions.bufferMs) || 40;
+    this._MIN_MS    = Math.max(10, this._TARGET_MS / 3);
 
     this.port.onmessage = (e) => {
       const int16 = new Int16Array(e.data);
@@ -28,11 +28,7 @@ class PCMProcessor extends AudioWorkletProcessor {
 
       // Start playing once we have enough buffer
       const targetSamples = sampleRate * this._TARGET_MS / 1000;
-      const minSamples    = sampleRate * this._MIN_MS    / 1000;
       if (!this._ready && this._bufSamples >= targetSamples) {
-        this._ready = true;
-      } else if (!this._ready && this._bufSamples >= minSamples) {
-        // Already started but buffer ran dry and recovered
         this._ready = true;
       }
     };

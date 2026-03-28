@@ -85,6 +85,12 @@
   </div>
   <input type="hidden" id="port-input" value="8765">
   <div class="row">
+    <span class="label">Buffer</span>
+    <input type="range" id="buffer-ms" min="10" max="300" step="10" value="40"
+      oninput="$('buffer-val').textContent = this.value + 'ms'">
+    <span id="buffer-val" style="font-size:0.78rem;opacity:0.6;width:40px;flex-shrink:0">40ms</span>
+  </div>
+  <div class="row">
     <span class="label">Âm lượng</span>
     <input type="range" id="volume" min="0" max="1" step="0.02" value="1"
       oninput="setVolume(this.value)">
@@ -229,9 +235,11 @@ async function startAudio() {
   gainNode.connect(analyser);
   analyser.connect(audioCtx.destination);
 
+  const bufferMs = parseInt($('buffer-ms').value) || 40;
   await audioCtx.audioWorklet.addModule('audio-processor.js');
   workletNode = new AudioWorkletNode(audioCtx, 'pcm-processor', {
-    numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2]
+    numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2],
+    processorOptions: { bufferMs }
   });
   workletNode.connect(gainNode);
   d('d-wl', 'OK', 'ok');
