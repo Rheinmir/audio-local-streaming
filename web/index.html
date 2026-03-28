@@ -120,6 +120,8 @@ function status(msg) { $('status').textContent = msg; }
 function setVolume(v) { if (gainNode) gainNode.gain.value = +v; }
 
 // ── load config + devices on startup ──
+let _configLoaded = false;
+
 async function loadConfig() {
   try {
     const [cfg, devs] = await Promise.all([
@@ -128,21 +130,23 @@ async function loadConfig() {
     ]);
 
     window._serverCfg = cfg;
-    $('port-input').value = cfg.wss_port || 8765;
 
-    // Show network addresses
-    const port = cfg.https_port || 8443;
-    let addrHtml = '';
-    if (cfg.lan_ip) {
-      addrHtml += `<div>🏠 LAN &nbsp;&nbsp;&nbsp;<a href="https://${cfg.lan_ip}:${port}" style="color:#1db954">https://${cfg.lan_ip}:${port}</a></div>`;
+    // Only set port + addresses on first load
+    if (!_configLoaded) {
+      $('port-input').value = cfg.wss_port || 8765;
+      const port = cfg.https_port || 8443;
+      let addrHtml = '';
+      if (cfg.lan_ip)
+        addrHtml += `<div>🏠 LAN &nbsp;&nbsp;&nbsp;<a href="https://${cfg.lan_ip}:${port}" style="color:#1db954">https://${cfg.lan_ip}:${port}</a></div>`;
+      if (cfg.tailscale_ip)
+        addrHtml += `<div>🌐 Tailscale &nbsp;<a href="https://${cfg.tailscale_ip}:${port}" style="color:#1db954">https://${cfg.tailscale_ip}:${port}</a></div>`;
+      $('addr-list').innerHTML = addrHtml || '<span style="opacity:0.4">Không tìm được địa chỉ</span>';
+      _configLoaded = true;
     }
-    if (cfg.tailscale_ip) {
-      addrHtml += `<div>🌐 Tailscale &nbsp;<a href="https://${cfg.tailscale_ip}:${port}" style="color:#1db954">https://${cfg.tailscale_ip}:${port}</a></div>`;
-    }
-    $('addr-list').innerHTML = addrHtml || '<span style="opacity:0.4">Không tìm được địa chỉ</span>';
 
-    // Populate device list (info only — server already captures fixed device)
+    // Always update device dropdown (device có thể đổi)
     const sel = $('device-select');
+    const prev = sel.value;
     sel.innerHTML = '';
     devs.forEach(dev => {
       const opt = document.createElement('option');
@@ -151,11 +155,12 @@ async function loadConfig() {
       if (dev.index === cfg.device_index) opt.selected = true;
       sel.appendChild(opt);
     });
-    if (cfg.device_name) {
-      status('Sẵn sàng');
-    }
+    // Restore selection if user manually picked
+    if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+
+    if (!playing) status(cfg.device_name ? 'Sẵn sàng' : 'Chờ server...');
   } catch(e) {
-    status('Không tải được config');
+    if (!playing) status('Chờ server...');
   }
 }
 
@@ -267,6 +272,8 @@ async function toggle() {
 }
 
 loadConfig();
+// Re-check config every 5s (device có thể đổi khi server restart)
+setInterval(loadConfig, 5000);
 </script>
 </body>
 </html>
