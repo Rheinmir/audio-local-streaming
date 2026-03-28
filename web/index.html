@@ -62,6 +62,14 @@
 <div id="status">Loading...</div>
 <div id="vu"><div id="vu-bar"></div></div>
 
+<!-- Network addresses -->
+<div class="card" id="addr-card">
+  <div class="card-title">KẾT NỐI TỪ THIẾT BỊ KHÁC</div>
+  <div id="addr-list" style="font-family:monospace;font-size:0.8rem;line-height:2;">
+    <span style="opacity:0.4">Đang tải...</span>
+  </div>
+</div>
+
 <!-- Config -->
 <div class="card">
   <div class="card-title">CẤU HÌNH</div>
@@ -121,6 +129,17 @@ async function loadConfig() {
 
     window._serverCfg = cfg;
     $('port-input').value = cfg.wss_port || 8765;
+
+    // Show network addresses
+    const port = cfg.https_port || 8443;
+    let addrHtml = '';
+    if (cfg.lan_ip) {
+      addrHtml += `<div>🏠 LAN &nbsp;&nbsp;&nbsp;<a href="https://${cfg.lan_ip}:${port}" style="color:#1db954">https://${cfg.lan_ip}:${port}</a></div>`;
+    }
+    if (cfg.tailscale_ip) {
+      addrHtml += `<div>🌐 Tailscale &nbsp;<a href="https://${cfg.tailscale_ip}:${port}" style="color:#1db954">https://${cfg.tailscale_ip}:${port}</a></div>`;
+    }
+    $('addr-list').innerHTML = addrHtml || '<span style="opacity:0.4">Không tìm được địa chỉ</span>';
 
     // Populate device list (info only — server already captures fixed device)
     const sel = $('device-select');

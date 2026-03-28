@@ -220,13 +220,32 @@ def main():
 
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('8.8.8.8', 80)); ip = s.getsockname()[0]; s.close()
-    except: ip = 'localhost'
+        s.connect(('8.8.8.8', 80)); lan_ip = s.getsockname()[0]; s.close()
+    except: lan_ip = 'localhost'
+
+    # Detect Tailscale IP (100.x.x.x range)
+    tailscale_ip = None
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None):
+            ip = info[4][0]
+            if ip.startswith('100.') and not ip.startswith('100.0.') and not ip.startswith('100.128.'):
+                tailscale_ip = ip
+                break
+    except: pass
+    if not tailscale_ip:
+        try:
+            import subprocess
+            out = subprocess.check_output(['powershell', '-Command',
+                "(Get-NetIPAddress -InterfaceAlias 'Tailscale' -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress"],
+                stderr=subprocess.DEVNULL).decode().strip()
+            if out: tailscale_ip = out
+        except: pass
 
     CFG.update({
-        'https_port': args.https_port,
-        'wss_port':   args.wss_port,
-        'lan_ip':     ip,
+        'https_port':   args.https_port,
+        'wss_port':     args.wss_port,
+        'lan_ip':       lan_ip,
+        'tailscale_ip': tailscale_ip,
     })
 
     print("=" * 50)
