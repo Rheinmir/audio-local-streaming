@@ -140,9 +140,9 @@ def audio_thread(device_idx):
         dev_rate = int(device.get('defaultSampleRate', 48000))
         dev_ch   = min(int(device.get('maxInputChannels', CHANNELS)), CHANNELS)
         chunk    = dev_rate * CHUNK_MS // 1000
-        print(f"[audio] START [{device['index']}] {device['name']} @ {dev_rate}Hz")
+        print(f"[audio] START [{device['index']}] {device['name']} @ {dev_rate}Hz ch={dev_ch}")
         CFG.update({'device_name': device['name'], 'device_index': device['index'],
-                    'device_rate': dev_rate})
+                    'device_rate': dev_rate, 'device_ch': 2})
 
         # Flush stale queue
         while not audio_queue.empty():
@@ -152,15 +152,30 @@ def audio_thread(device_idx):
         # Notify clients of new sample rate
         CFG['device_rate'] = dev_rate
 
+        import struct, array as _array
+        import ctypes
+
         def cb(in_data, fc, ti, st):
             if _audio_restart.is_set():
                 return (None, pyaudio.paComplete)
             if not audio_queue.full():
-                audio_queue.put_nowait(bytes(in_data))
+                # Convert float32 → int16 with clipping, then interleave to stereo if mono
+                import struct as _s
+                n = len(in_data) // 4
+                floats = _s.unpack_from(f'{n}f', in_data)
+                if dev_ch == 1:
+                    # Mono → duplicate to stereo
+                    out = _s.pack(f'{n*2}h',
+                        *[max(-32768, min(32767, int(f * 32767)))
+                          for f in floats for _ in range(2)])
+                else:
+                    out = _s.pack(f'{n}h',
+                        *[max(-32768, min(32767, int(f * 32767))) for f in floats])
+                audio_queue.put_nowait(out)
             return (None, pyaudio.paContinue)
 
         try:
-            stream = p.open(format=pyaudio.paInt16, channels=dev_ch, rate=dev_rate,
+            stream = p.open(format=pyaudio.paFloat32, channels=dev_ch, rate=dev_rate,
                             frames_per_buffer=chunk, input=True,
                             input_device_index=device['index'], stream_callback=cb)
             stream.start_stream()
