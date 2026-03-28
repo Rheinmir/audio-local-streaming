@@ -76,6 +76,12 @@
   <div class="row">
     <span class="label">Nguồn audio</span>
     <select id="device-select"><option value="">Đang tải...</option></select>
+    <button onclick="applyDevice()"
+      style="background:#1db954;border:none;color:#fff;padding:6px 12px;
+             border-radius:8px;cursor:pointer;font-size:0.8rem;flex-shrink:0">Áp dụng</button>
+  </div>
+  <div class="row" style="padding-left:90px">
+    <span id="d-device" style="font-size:0.72rem;opacity:0.5">-</span>
   </div>
   <input type="hidden" id="port-input" value="8765">
   <div class="row">
@@ -158,9 +164,32 @@ async function loadConfig() {
     // Restore selection if user manually picked
     if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
 
+    $('d-device').textContent = cfg.device_name
+      ? `[${cfg.device_index}] ${cfg.device_name} @ ${cfg.device_rate}Hz`
+      : 'Chưa chọn nguồn';
     if (!playing) status(cfg.device_name ? 'Sẵn sàng' : 'Chờ server...');
   } catch(e) {
     if (!playing) status('Chờ server...');
+  }
+}
+
+async function applyDevice() {
+  const idx = parseInt($('device-select').value);
+  if (isNaN(idx)) return;
+  try {
+    await fetch('/api/device', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({index: idx})
+    });
+    // AudioContext sample rate may change — restart audio
+    if (audioCtx) { audioCtx.close(); audioCtx = null; workletNode = null; analyser = null; }
+    if (playing) {
+      await startAudio();
+    }
+    setTimeout(loadConfig, 1000);
+  } catch(e) {
+    d('d-err', 'Lỗi đổi device: ' + e.message, 'err');
   }
 }
 
