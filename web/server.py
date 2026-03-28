@@ -16,7 +16,7 @@ try:
 except ImportError:
     print("pip install pyaudiowpatch"); sys.exit(1)
 
-CHUNK_MS   = 10
+CHUNK_MS   = 20
 CHANNELS   = 2
 SCRIPT_DIR = Path(__file__).parent
 
