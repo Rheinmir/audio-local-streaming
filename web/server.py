@@ -195,11 +195,51 @@ async def broadcast_loop():
                 print(f"[send err] {e}"); dead.add(ws)
         clients.difference_update(dead)
 
+def detect_connection_type(ip: str) -> dict:
+    """Return connection type info for a given client IP."""
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(ip)
+        # LAN ranges
+        lan_ranges = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8']
+        for r in lan_ranges:
+            if addr in ipaddress.ip_network(r):
+                return {'type': 'lan', 'label': 'LAN nội bộ', 'internet': False}
+        # Tailscale range
+        if addr in ipaddress.ip_network('100.64.0.0/10'):
+            # Check if direct or relay
+            relay = True
+            try:
+                import subprocess
+                out = subprocess.check_output(
+                    ['tailscale', 'status', '--json'],
+                    stderr=subprocess.DEVNULL, timeout=3).decode()
+                import json as _json
+                data = _json.loads(out)
+                for peer in data.get('Peer', {}).values():
+                    peer_ips = peer.get('TailscaleIPs', [])
+                    if ip in peer_ips:
+                        relay = not peer.get('Direct', False)
+                        break
+            except: pass
+            if relay:
+                return {'type': 'tailscale_relay', 'label': 'Tailscale (qua relay — tốn băng thông)', 'internet': True}
+            else:
+                return {'type': 'tailscale_direct', 'label': 'Tailscale Direct (P2P — không tốn băng thông)', 'internet': False}
+    except: pass
+    return {'type': 'unknown', 'label': 'Không xác định', 'internet': None}
+
 async def ws_handler(websocket):
     clients.add(websocket)
-    addr = getattr(websocket, 'remote_address', '?')
+    addr = getattr(websocket, 'remote_address', ('?', 0))
+    ip = addr[0] if isinstance(addr, tuple) else str(addr)
     print(f"Client +: {addr}  (total={len(clients)})")
     try:
+        # Send connection type info immediately
+        conn_info = detect_connection_type(ip)
+        conn_info['ip'] = ip
+        await websocket.send(json.dumps({'type': 'conn_info', **conn_info}))
+
         async for msg in websocket:
             if isinstance(msg, str) and msg.startswith('ping:'):
                 await websocket.send(msg)

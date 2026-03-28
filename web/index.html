@@ -95,6 +95,7 @@
 <div class="card">
   <div class="card-title">TRẠNG THÁI</div>
   <div class="debug-row">WebSocket <span id="d-ws" class="warn">chưa kết nối</span></div>
+  <div class="debug-row">Kết nối   <span id="d-conn">-</span></div>
   <div class="debug-row">Latency   <span id="d-lat">-</span></div>
   <div class="debug-row">Packets/s <span id="d-pps">0</span></div>
   <div class="debug-row">Đã nhận   <span id="d-kb">0 KB</span></div>
@@ -266,6 +267,15 @@ function connectWS() {
       if (e.data.startsWith('ping:')) {
         const rtt = Date.now() - parseInt(e.data.slice(5));
         d('d-lat', Math.round(rtt/2) + ' ms', rtt/2 < 20 ? 'ok' : rtt/2 < 60 ? 'warn' : 'err');
+      } else {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'conn_info') {
+            const icon = msg.type === 'lan' ? '🏠' : msg.internet === false ? '🌐✓' : '🌐⚠️';
+            const cls  = msg.internet === false ? 'ok' : msg.internet ? 'warn' : '';
+            d('d-conn', icon + ' ' + msg.label, cls);
+          }
+        } catch {}
       }
       return;
     }
